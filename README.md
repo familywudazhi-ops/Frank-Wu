@@ -1,4 +1,4 @@
-# Trade Balance Live｜貿易平衡全民搶答
+# Trade Balance Live｜貿易平衡學生搶答
 
 這是一款以「貿易差額對總體經濟的推波助瀾」為教材的 Kahoot 型全班同步搶答遊戲。
 
