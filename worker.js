@@ -19,7 +19,7 @@ const cors = {
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...cors }
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...cors }
   });
 }
 
@@ -99,7 +99,30 @@ export default {
 
         if (request.method === 'GET' && !parts[3]) {
           const players = await env.DB.prepare('SELECT id, nickname, total_score FROM players WHERE session_id = ? ORDER BY total_score DESC LIMIT 100').bind(session.id).all();
-          return json({ session: { code: session.join_code, status: session.status, questionIndex: session.question_index, language: session.language || 'zh' }, players: players.results });
+          const questionId = QUESTIONS[session.question_index]?.id;
+          const responseCounts = [0, 0, 0, 0];
+          if (questionId) {
+            const responses = await env.DB.prepare(`
+              SELECT latest.answer_index, COUNT(*) AS count
+              FROM question_attempts AS latest
+              WHERE latest.session_id = ? AND latest.question_id = ?
+                AND latest.id = (
+                  SELECT MAX(previous.id)
+                  FROM question_attempts AS previous
+                  WHERE previous.session_id = latest.session_id
+                    AND previous.player_id = latest.player_id
+                    AND previous.question_id = latest.question_id
+                )
+              GROUP BY latest.answer_index
+            `).bind(session.id, questionId).all();
+            for (const response of responses.results) {
+              const answerIndex = Number(response.answer_index);
+              if (answerIndex >= 0 && answerIndex < responseCounts.length) {
+                responseCounts[answerIndex] = Number(response.count) || 0;
+              }
+            }
+          }
+          return json({ session: { code: session.join_code, status: session.status, questionIndex: session.question_index, language: session.language || 'zh' }, players: players.results, responseCounts });
         }
       }
       return json({ error: 'not_found' }, 404);
