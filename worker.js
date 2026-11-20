@@ -12,7 +12,7 @@ const QUESTIONS = [
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Session-Owner',
   'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
 };
 
@@ -56,6 +56,39 @@ export default {
         const joinCode = parts[2].toUpperCase();
         const session = await getSession(env, joinCode);
         if (!session) return json({ error: 'session_not_found' }, 404);
+
+        if (request.method === 'GET' && parts[3] === 'results') {
+          if (request.headers.get('X-Session-Owner') !== session.id) {
+            return json({ error: 'forbidden' }, 403);
+          }
+
+          const [players, attempts] = await Promise.all([
+            env.DB.prepare(`
+              SELECT id, nickname, total_score, joined_at
+              FROM players
+              WHERE session_id = ?
+              ORDER BY joined_at ASC, id ASC
+            `).bind(session.id).all(),
+            env.DB.prepare(`
+              SELECT attempt.player_id, attempt.question_id, attempt.answer_index,
+                     attempt.is_correct, attempt.response_time_ms, attempt.score_awarded
+              FROM question_attempts AS attempt
+              JOIN (
+                SELECT player_id, question_id, MAX(id) AS latest_id
+                FROM question_attempts
+                WHERE session_id = ?
+                GROUP BY player_id, question_id
+              ) AS latest ON latest.latest_id = attempt.id
+              ORDER BY attempt.player_id, attempt.question_id
+            `).bind(session.id).all()
+          ]);
+
+          return json({
+            session: { code: session.join_code, startedAt: session.started_at },
+            players: players.results,
+            attempts: attempts.results
+          });
+        }
 
         if (request.method === 'POST' && parts[3] === 'join') {
           const body = await request.json();
